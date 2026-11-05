@@ -71,7 +71,7 @@ def train_model(dataset, train_data, val_data, test_data):
     return model, model_config
 
 dataset = 'CiteSeer'
-path = osp.join('../', 'data', 'Planetoid')
+path = osp.join(osp.dirname(osp.abspath(__file__)), 'data', 'Planetoid')  # downloads inside the repo
 transform = T.Compose([
     T.NormalizeFeatures(),
     T.ToDevice(device),

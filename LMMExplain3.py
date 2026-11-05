@@ -28,19 +28,49 @@ try:
 except ImportError:
     pass  # python-dotenv not installed; falls back to env vars
 
-ANTHROPIC_API_KEY = os.environ.get("CLAUDKEY", "")
+# ANTHROPIC_API_KEY is the standard name; CLAUDKEY is still accepted for older .env files.
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDKEY", "")
+
+# Model used by examples 3, 4 and 8.
+CLAUDE_MODEL = "claude-opus-5-5"
 
 
 def _anthropic_client():
     """Returns an Anthropic client using the key defined above."""
     import anthropic
-    if not ANTHROPIC_API_KEY:
+    if ANTHROPIC_API_KEY:
+        return anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    try:
+        # Falls back to the SDK's own credential lookup (e.g. an `ant auth login` profile).
+        return anthropic.Anthropic()
+    except anthropic.AnthropicError:
         raise ValueError(
-            "CLAUDKEY not found. Add it to your .env file as:\n"
-            "  CLAUDKEY=sk-ant-...\n"
+            "No Anthropic API key found. Add it to your .env file as:\n"
+            "  ANTHROPIC_API_KEY=sk-ant-...\n"
             "or set it as an environment variable."
         )
-    return anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+
+def _ask_claude(client, prompt, max_tokens=4000):
+    """Sends one prompt to Claude and returns (response, answer_text).
+
+    Current Claude models think before answering, so the response can hold
+    thinking blocks as well as text; only the text blocks are the answer.
+    Low effort keeps the demos fast and cheap. If a safety classifier declines,
+    the server-side fallback retries on another model inside the same call.
+    """
+    response = client.beta.messages.create(
+        model=CLAUDE_MODEL,
+        max_tokens=max_tokens,
+        output_config={"effort": "low"},
+        betas=["server-side-fallback-2026-07-01"],
+        fallbacks="default",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    if response.stop_reason == "refusal":
+        return response, "[The model declined to answer this prompt.]"
+    text = "".join(block.text for block in response.content if block.type == "text")
+    return response, text
 
 # ===========================================================
 # 1. SHAP - Feature Attribution for LLM Predictions
@@ -149,29 +179,26 @@ def example_chain_of_thought():
         "If Alice buys 4 apples and 3 oranges, how much does she spend in total?"
     )
 
+    # Note: current Claude models also reason internally before answering, so the
+    # "direct" answer is not reasoning-free. What CoT adds is *visible* reasoning
+    # in the answer itself, which is the part a human can inspect.
+
     # Without CoT
-    response_direct = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=128,
-        messages=[{"role": "user", "content": question}]
+    _, direct_text = _ask_claude(
+        client, question + "\n\nGive only the final answer, with no explanation."
     )
 
     # With Chain-of-Thought
-    response_cot = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=512,
-        messages=[{
-            "role": "user",
-            "content": question + "\n\nThink step by step before giving your final answer."
-        }]
+    _, cot_text = _ask_claude(
+        client, question + "\n\nThink step by step before giving your final answer."
     )
 
     print("=== Chain-of-Thought ===")
     print(f"Question: {question}\n")
     print("Direct answer:")
-    print(response_direct.content[0].text)
+    print(direct_text)
     print("\nChain-of-Thought answer:")
-    print(response_cot.content[0].text)
+    print(cot_text)
 
 
 # ===========================================================
@@ -219,12 +246,8 @@ def example_rag():
             f"Answer using only the sources below. Cite each claim with [Source N].\n\n"
             f"Sources:\n{context}\n\nQuestion: {question}"
         )
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=256,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return response.content[0].text, retrieved
+        _, answer = _ask_claude(client, prompt)
+        return answer, retrieved
 
     question = "How do LLMs achieve transparency in their outputs?"
     answer, sources = rag_query(question)
@@ -473,13 +496,8 @@ def example_observability():
 
     def monitored_call(prompt: str) -> LLMTrace:
         start = time.time()
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=256,
-            messages=[{"role": "user", "content": prompt}]
-        )
+        response, text = _ask_claude(client, prompt)
         latency = (time.time() - start) * 1000
-        text = response.content[0].text
         risk, flags = assess_hallucination_risk(text)
         return LLMTrace(
             timestamp=datetime.now(timezone.utc).isoformat(),
@@ -614,7 +632,7 @@ if __name__ == "__main__":
         key = sys.argv[1].strip().lower()
         if key == "all":
             print("Running all examples sequentially...\n")
-            print("Note: examples 3, 4, 8 require ANTHROPIC_API_KEY to be set.\n")
+            print("Note: examples 3, 4, 8 require ANTHROPIC_API_KEY (or CLAUDKEY) to be set.\n")
             for k in examples:
                 run_example(k)
                 print()
@@ -628,15 +646,15 @@ if __name__ == "__main__":
                 print(f"  {k}  {name}")
     else:
         print("LLM Explainability Examples")
-        print("Usage: python llm_explainability_examples.py <number|all>")
+        print("Usage: python LMMExplain3.py <number|all>")
         print()
         for k, (name, _) in examples.items():
             print(f"  {k}  {name}")
         print()
-        print("Examples: python llm_explainability_examples.py 1")
-        print("          python llm_explainability_examples.py all")
+        print("Examples: python LMMExplain3.py 1")
+        print("          python LMMExplain3.py all")
         print()
-        print("Note: examples 3, 4, 8 require ANTHROPIC_API_KEY to be set.")
+        print("Note: examples 3, 4, 8 require ANTHROPIC_API_KEY (or CLAUDKEY) to be set.")
 
 
 

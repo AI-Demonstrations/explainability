@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -75,7 +76,7 @@ def generate_grad_cam(model, img_tensor, target_layer, target_class=None):
 # Example Usage:
 if __name__ == "__main__":
     # Load a pre-trained ResNet model
-    model = models.resnet50(pretrained=True)
+    model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
 
     # Define image transformations
     preprocess = transforms.Compose([
@@ -85,7 +86,8 @@ if __name__ == "__main__":
     ])
 
     # Load and preprocess an image
-    img_path = "/home/jwh/workspace/explainability/images/cat.jpg" # Replace with your image path
+    here = os.path.dirname(os.path.abspath(__file__))
+    img_path = os.path.join(here, "images", "cat.jpg")  # Replace with your image path
     original_image = Image.open(img_path).convert('RGB')
     img_tensor = preprocess(original_image).unsqueeze(0)
 
@@ -100,5 +102,5 @@ if __name__ == "__main__":
     plt.imshow(heatmap, cmap='jet', alpha=0.5, extent=(0, original_image.width, original_image.height, 0))
     plt.title("Grad-CAM Heatmap")
     plt.axis('off')
+    plt.savefig(os.path.join(here, "heatmap.jpg"), bbox_inches="tight")  # save before show, or the file can be blank
     plt.show()
-    plt.savefig("/home/jwh/workspace/explainability/heatmap.jpg")

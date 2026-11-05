@@ -59,9 +59,8 @@ plt.xlabel('Feature Index')
 plt.ylabel('Token Position')
 plt.title('Sparsity Pattern of SAE Activations')
 plt.tight_layout()
+plt.savefig('mech.png')  # save before show, or the file can be blank
 plt.show()
-
-plt.savefig('mech.png')
 
 # Calculate sparsity statistics
 sparsity_ratio = (act_np == 0).mean() * 100
