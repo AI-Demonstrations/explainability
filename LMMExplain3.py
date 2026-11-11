@@ -22,14 +22,19 @@ import os
 # Loads ANTHROPIC_API_KEY (and any other vars) from a .env file
 # in the same directory as this script.
 # pip install python-dotenv
+_ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(_ENV_PATH)
 except ImportError:
-    pass  # python-dotenv not installed; falls back to env vars
+    # Without python-dotenv the .env file is never read, so say so instead of
+    # failing later with a confusing "no credentials" error.
+    if os.path.exists(_ENV_PATH):
+        print(f"[warning] Found {_ENV_PATH} but python-dotenv is not installed, "
+              "so it was not loaded. Run: pip install python-dotenv")
 
 # ANTHROPIC_API_KEY is the standard name; CLAUDKEY is still accepted for older .env files.
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDKEY", "")
+ANTHROPIC_API_KEY = (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDKEY", "")).strip().strip('"\'')
 
 # Model used by examples 3, 4 and 8.
 CLAUDE_MODEL = "claude-opus-5-5"
@@ -39,16 +44,24 @@ def _anthropic_client():
     """Returns an Anthropic client using the key defined above."""
     import anthropic
     if ANTHROPIC_API_KEY:
+        if not ANTHROPIC_API_KEY.startswith("sk-ant-"):
+            raise ValueError(
+                f"ANTHROPIC_API_KEY starts with '{ANTHROPIC_API_KEY[:7]}', but Anthropic keys "
+                "start with 'sk-ant-'. ('sk-proj-' is an OpenAI key.) Create an Anthropic key "
+                "at https://console.anthropic.com/settings/keys."
+            )
         return anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    try:
-        # Falls back to the SDK's own credential lookup (e.g. an `ant auth login` profile).
-        return anthropic.Anthropic()
-    except anthropic.AnthropicError:
+    # Falls back to the SDK's own credential lookup (ANTHROPIC_AUTH_TOKEN, or an
+    # `ant auth login` profile). The SDK only checks credentials when a request
+    # is sent, so the check below gives a clearer message than it would.
+    if not (os.environ.get("ANTHROPIC_AUTH_TOKEN") or os.environ.get("ANTHROPIC_PROFILE")
+            or os.path.isdir(os.path.expanduser("~/.config/anthropic"))):
         raise ValueError(
-            "No Anthropic API key found. Add it to your .env file as:\n"
+            f"No Anthropic API key found. Add it to {_ENV_PATH} as:\n"
             "  ANTHROPIC_API_KEY=sk-ant-...\n"
             "or set it as an environment variable."
         )
+    return anthropic.Anthropic()
 
 
 def _ask_claude(client, prompt, max_tokens=4000):
@@ -92,9 +105,14 @@ def example_shap():
         model="distilbert-base-uncased-finetuned-sst-2-english"
     )
 
+    import numpy as np
+
     def predict(texts):
+        # Return P(POSITIVE) rather than a hard 0/1 label, so SHAP can attribute
+        # smooth changes in confidence instead of only label flips.
         results = classifier(list(texts))
-        return [1.0 if r["label"] == "POSITIVE" else 0.0 for r in results]
+        return np.array([r["score"] if r["label"] == "POSITIVE" else 1 - r["score"]
+                         for r in results])
 
     explainer = shap.Explainer(predict, shap.maskers.Text(tokenizer=r"\W+"))
 

@@ -65,14 +65,21 @@ pip install torch torchvision tensorboard matplotlib numpy pillow scikit-learn
 pip install torch_geometric                          # GNNExplainer.py
 pip install transformers shap lime sentence-transformers \
             huggingface_hub anthropic python-dotenv  # LMMExplain3.py
-pip install transformer_lens sae_lens                # MechInterp.py
+pip install "transformer_lens>=4" "sae_lens>=6"      # MechInterp.py
 ```
 
-`sae_lens` and `transformer_lens` pin specific `torch`/`transformers` versions. If they conflict with the rest, give `MechInterp.py` its own environment.
+`MechInterp.py` targets TransformerLens 4.x (`TransformerBridge`) and SAE Lens 6.x. Older releases (TransformerLens 3, SAE Lens 5) use a different API and will not run it. These libraries pin specific `torch`/`transformers` versions; if they conflict with the rest, give `MechInterp.py` its own environment.
 
 ### Environment C — knowledge-graph embeddings (optional)
 
-`tensorboard1.py` needs **AmpliGraph 2**, which supports only a narrow range of TensorFlow versions. Install it in its own environment and follow the version table in the [AmpliGraph documentation](https://docs.ampligraph.org/).
+`tensorboard1.py` needs **AmpliGraph 2**, which supports only a narrow range of TensorFlow versions. This combination is known to work:
+
+```bash
+python3.10 -m venv .venv-kg && source .venv-kg/bin/activate
+pip install ampligraph==2.1.0 "tensorflow==2.10.*" "setuptools<81" pandas
+```
+
+AmpliGraph still imports `pkg_resources`, which setuptools 81 removed; hence the `setuptools<81` pin. See the [AmpliGraph documentation](https://docs.ampligraph.org/) for other version combinations.
 
 ### API key (LLM examples 3, 4, 8 only)
 
@@ -87,6 +94,8 @@ echo 'ANTHROPIC_API_KEY=sk-ant-...' > .env
 ### GPU
 
 Everything runs on CPU. A GPU speeds up `MechInterp.py`, `GNNExplainer.py`, and the transformer examples, and they pick it up automatically (`cuda`, or `mps` on Apple silicon for the GNN example). The CUDA/cuDNN warnings TensorFlow prints at start-up are harmless.
+
+Current PyTorch wheels no longer include kernels for older NVIDIA GPUs (Pascal, e.g. GTX 10-series, and earlier). On those cards `torch.cuda.is_available()` still returns `True`, but the scripts fail with `CUDA error: no kernel image is available for execution on the device`. Either hide the GPU so they run on CPU (`CUDA_VISIBLE_DEVICES= python GNNExplainer.py`), or install a PyTorch build that still supports your card (check `torch.cuda.get_arch_list()`).
 
 ---
 
@@ -152,7 +161,7 @@ CiteSeer downloads automatically to `data/Planetoid/` inside the repo on the fir
 
 Trains a small dense network on MNIST (~97% test accuracy), then applies the **Fast Gradient Sign Method**, which nudges every pixel by ε = 0.1 in the direction that increases the loss.
 
-**What to look for:** the perturbed "7" is classified as "3", and accuracy on the full adversarial test set drops from **97.4% to about 3%** even though the images still look the same to a person. This is why explainability and robustness are taught together: a model can be accurate and still rely on features no human would use.
+**What to look for:** the perturbed "7" is classified as a different digit (which one varies between training runs, often "2" or "3"), and accuracy on the full adversarial test set drops from **97.4% to about 3%** even though the images still look the same to a person. This is why explainability and robustness are taught together: a model can be accurate and still rely on features no human would use.
 
 ### 6. Mechanistic interpretability — `MechInterp.py`
 
