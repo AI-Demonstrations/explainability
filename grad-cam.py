@@ -75,8 +75,11 @@ def generate_grad_cam(model, img_tensor, target_layer, target_class=None):
 
 # Example Usage:
 if __name__ == "__main__":
-    # Load a pre-trained ResNet model
-    model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
+    # Load a pre-trained ResNet model and the names of its 1,000 ImageNet classes
+    weights = models.ResNet50_Weights.IMAGENET1K_V1
+    model = models.resnet50(weights=weights)
+    model.eval()
+    categories = weights.meta["categories"]
 
     # Define image transformations
     preprocess = transforms.Compose([
@@ -94,13 +97,37 @@ if __name__ == "__main__":
     # Define the target layer (e.g., the last convolutional layer)
     target_layer = model.layer4[-1] # For ResNet50, this is a good choice
 
-    # Generate Grad-CAM heatmap
-    heatmap = generate_grad_cam(model, img_tensor, target_layer)
+    # Print the model's top predictions, so we know which classes the heatmaps explain
+    with torch.no_grad():
+        probs = model(img_tensor).softmax(dim=1)[0]
+    top = probs.topk(5)
+    print("Top 5 predictions:")
+    for p, idx in zip(top.values.tolist(), top.indices.tolist()):
+        print(f"  {categories[idx]:<15} {p:6.1%}   (class {idx})")
 
-    # Visualize the heatmap
-    plt.imshow(original_image)
-    plt.imshow(heatmap, cmap='jet', alpha=0.5, extent=(0, original_image.width, original_image.height, 0))
-    plt.title("Grad-CAM Heatmap")
-    plt.axis('off')
-    plt.savefig(os.path.join(here, "heatmap.jpg"), bbox_inches="tight")  # save before show, or the file can be blank
+    # Explain the top two predictions side by side.
+    # To explain a class of your choice instead, use e.g. [categories.index("tabby")]
+    target_classes = top.indices[:2].tolist()
+
+    # Draw the original image, then one Grad-CAM overlay per class
+    extent = (0, original_image.width, original_image.height, 0)  # stretches the 7x7 map over the photo
+    fig, axes = plt.subplots(1, 1 + len(target_classes), figsize=(5 * (1 + len(target_classes)), 3.6))
+    axes[0].imshow(original_image)
+    axes[0].set_title("Original image")
+    for ax, target_class in zip(axes[1:], target_classes):
+        heatmap = generate_grad_cam(model, img_tensor, target_layer, target_class)
+        ax.imshow(original_image)
+        overlay = ax.imshow(heatmap, cmap='jet', alpha=0.5, extent=extent, vmin=0, vmax=1)
+        ax.set_title(f"Grad-CAM for \"{categories[target_class]}\" ({probs[target_class]:.1%})")
+    for ax in axes:
+        ax.axis('off')
+
+    # One colour bar for all heatmaps. Each heatmap is scaled to 0-1 on its own,
+    # so red means "this image's strongest support for that class", not a probability.
+    colour_bar = fig.colorbar(overlay, ax=axes, fraction=0.025, pad=0.02, shrink=0.8)
+    colour_bar.set_label("Relative support (0 = least, 1 = most)")
+
+    out_path = os.path.join(here, "heatmap.jpg")
+    fig.savefig(out_path, bbox_inches="tight")  # save before show, or the file can be blank
+    print(f"Saved {out_path}")
     plt.show()

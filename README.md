@@ -14,7 +14,7 @@ The examples answer three questions a production team gets asked about a model:
 
 | File | Technique | Model / data | Framework | Runtime (CPU) |
 |---|---|---|---|---|
-| [`1-ExplainabilitySHAPhousing.ipynb`](1-ExplainabilitySHAPhousing.ipynb) | SHAP — global and local feature attribution | Random forest on California Housing | scikit-learn, shap | ~3–5 min (500-row sample) |
+| [`1-ExplainabilitySHAPhousing.ipynb`](1-ExplainabilitySHAPhousing.ipynb) | SHAP — global and local feature attribution | Random forest on California Housing | scikit-learn, shap | ~1 min (500-row sample) |
 | [`2-ExplainabilityLimeCat.ipynb`](2-ExplainabilityLimeCat.ipynb) | LIME for images (superpixels) | MobileNetV2 (ImageNet) on `images/cat.jpg` | TensorFlow / Keras, lime | ~1 min |
 | [`grad-cam.py`](grad-cam.py) | Grad-CAM saliency heatmap | ResNet-50 (ImageNet) on `images/cat.jpg` | PyTorch, torchvision | < 1 min |
 | [`GNNExplainer.py`](GNNExplainer.py) | GNNExplainer for link prediction | 2-layer GCN on CiteSeer | PyTorch Geometric | 1–3 min |
@@ -35,6 +35,7 @@ Supporting files:
 | `heatmap.jpg` | Saved output of `grad-cam.py` |
 | `mech.png` | Saved output of `MechInterp.py` |
 | `runs/` | Saved TensorBoard logs from `tensorflow2.py` and `tensorflowExpanded.py` — viewable without re-running |
+| `instructor/INSTRUCTOR_GUIDE.md` | Teaching guide: preparation, session plans, expected outputs, exercises, and review questions |
 
 ---
 
@@ -95,7 +96,11 @@ echo 'ANTHROPIC_API_KEY=sk-ant-...' > .env
 
 Everything runs on CPU. A GPU speeds up `MechInterp.py`, `GNNExplainer.py`, and the transformer examples, and they pick it up automatically (`cuda`, or `mps` on Apple silicon for the GNN example). The CUDA/cuDNN warnings TensorFlow prints at start-up are harmless.
 
-Current PyTorch wheels no longer include kernels for older NVIDIA GPUs (Pascal, e.g. GTX 10-series, and earlier). On those cards `torch.cuda.is_available()` still returns `True`, but the scripts fail with `CUDA error: no kernel image is available for execution on the device`. Either hide the GPU so they run on CPU (`CUDA_VISIBLE_DEVICES= python GNNExplainer.py`), or install a PyTorch build that still supports your card (check `torch.cuda.get_arch_list()`).
+Current PyTorch wheels no longer include kernels for older NVIDIA GPUs (Pascal, e.g. GTX 10-series, and earlier). On those cards `torch.cuda.is_available()` still returns `True`, but the scripts fail with `CUDA error: no kernel image is available for execution on the device`. Either hide the GPU so they run on CPU (`CUDA_VISIBLE_DEVICES= python GNNExplainer.py`), or install a PyTorch build that still supports your card (check `torch.cuda.get_arch_list()`). For Pascal cards, the CUDA 12.6 build works with every library above:
+
+```bash
+pip install "torch==2.14.1+cu126" "torchvision==0.29.1+cu126" --index-url https://download.pytorch.org/whl/cu126
+```
 
 ---
 
@@ -117,13 +122,13 @@ It then shows the main SHAP views:
 | `summary_plot(plot_type='violin')` | Global | Distribution of each feature's impact |
 | `shap.plots.bar(shap_values[0])` | Local | Which features drove *this one* prediction? |
 | `shap.plots.waterfall` | Local | Step from the base value to this prediction |
-| `shap.plots.force` | Local | The same, as an interactive push/pull bar |
+| `shap.plots.force` | Local | The same, as a single push/pull bar (static image; the interactive version is in a comment) |
 
 **What to look for:** both methods rank `MedInc` (median income) first, but they disagree after that. The forest's impurity importance puts `AveOccup` second, while SHAP ranks `Latitude` and `Longitude` well above it. Impurity importance is known to be biased, and SHAP measures the effect on predictions directly. This disagreement is the main teaching point of the notebook.
 
-Expected results (vary slightly by random split): R² ≈ 0.81, MAE ≈ 0.32.
+Expected results (the split and forest use `random_state = 42`, so they repeat): R² ≈ 0.80, MAE ≈ 0.33. The SHAP importances are also printed as shares that add up to 1, like the forest's own importances, so the two rankings can be compared directly.
 
-> **Runtime:** the notebook explains a 500-row sample of the test set (`N_EXPLAIN = 500`), which takes a few minutes. Set `N_EXPLAIN = None` to explain all ~4,100 rows; the exact explainer then takes 20–30 minutes on CPU. For tree models, `shap.TreeExplainer(model)` is exact and takes seconds.
+> **Runtime:** the notebook explains a 500-row sample of the test set (`N_EXPLAIN = 500`), which takes about a minute (the forest uses every CPU core via `n_jobs = -1`). Set `N_EXPLAIN = None` to explain all ~4,100 rows; that takes about 8 times as long. For tree models, `shap.TreeExplainer(model)` is exact and takes seconds.
 
 ### 2. LIME for images — `2-ExplainabilityLimeCat.ipynb`
 
@@ -143,7 +148,9 @@ Grad-CAM weights the last convolutional layer's feature maps by the gradient of 
 python grad-cam.py
 ```
 
-It reads `images/cat.jpg` and writes `heatmap.jpg`, both next to the script, so it runs from any directory.
+It reads `images/cat.jpg`, prints the model's top 5 predictions, and writes `heatmap.jpg` next to the script, so it runs from any directory. The figure shows the original image beside a Grad-CAM heatmap for each of the top two predictions, with a colour bar. The colours run from blue (least support for that class) to red (most). Each heatmap is scaled to 0–1 on its own, so the colours are relative within one heatmap, not probabilities.
+
+**What to look for:** ResNet-50's top guess is `plastic bag` (9.9%), just ahead of `tabby` (8.8%). The "plastic bag" heatmap lights up the white petals below the cat, while the "tabby" heatmap lights up the cat's face. An explanation answers "why *this* class?", so always check which class it explains. To explain a different class, change `target_classes` in the script, e.g. `[categories.index("tabby")]`.
 
 Compare `heatmap.jpg` with the LIME mask. The two methods often highlight different regions for the same image.
 
